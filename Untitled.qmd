@@ -1,0 +1,175 @@
+---
+title: "Exercise 10"
+format: html
+---
+
+## Step 1
+
+Load needed LIBRARIES
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(skimr)
+library(ggplot2)
+library(cowplot)
+```
+
+DATA
+```{r}
+f <- "https://raw.githubusercontent.com/difiore/ada-datasets/refs/heads/main/AVONETdataset1.csv" #file path
+d <- read_csv(f, col_names = TRUE) #read dataset as tibble
+```
+
+Clean data
+```{r}
+d <- d |>
+  select(Species1, Family1, Order1, Beak.Length_Culmen, Beak.Width, Beak.Depth, Tarsus.Length, Wing.Length, Tail.Length, Mass, Habitat, Migration, Trophic.Level, Trophic.Niche, Min.Latitude, Max.Latitude, Centroid.Latitude, Primary.Lifestyle, Range.Size)
+```
+
+```{r}
+#create log mass variable
+d <- d |> mutate(logMass = log(Mass))
+```
+
+```{r}
+#relative beak length
+relBeak <- lm(log(Beak.Length_Culmen) ~ logMass, data = d)
+d <- d |> mutate(relBeak = resid(relBeak))
+```
+
+```{r}
+relTarsus <- lm(log(Tarsus.Length) ~ logMass, data = d) 
+d <- d |> mutate(relTarsus = resid(relTarsus))
+```
+
+```{r}
+p1 <- ggplot(data = d |>
+               drop_na(Primary.Lifestyle),
+             aes(x = Primary.Lifestyle, y = relBeak)) +
+  geom_boxplot()
+p1
+
+p2 <- ggplot(data = d |>
+              drop_na(Primary.Lifestyle),
+            aes(x = Primary.Lifestyle, y = relTarsus)) +
+  geom_boxplot()
+p2
+
+plot_grid(p1, p2, nrow=1)
+```
+
+```{r}
+#create log mass variable
+d <- d |> mutate(logMass = log(Mass))
+
+#create relative beak length
+beak_model <- lm(log(Beak.Length_Culmen) ~ logMass, data = d)
+d <- d |> mutate(relative_beak_length = resid(beak_model))
+
+#relBeak <- lm(logBeak ~ logMass, data = d) #difiore, change the logBeak to actual log
+relBeak <- lm(log(Beak.Length.Culmen) ~ log(Mass), data = d)
+d <- d |> mutate(relative_beak_length = resid(beak_model))
+
+#logBeak ~ logMass, data = d)
+
+#create relative tarsus length
+tarsus_model <- lm(log(Tarsus.Length) ~ logMass, data = d)
+d <- d |> mutate(relative_tarsus_length = resid(tarsus_model))
+
+relTarsus <- lm(logTarsus ~ logMass, data = d) #difiore
+```
+
+```{r}
+#boxplot of relative tarsus length by primary lifestyle
+p1 <- ggplot(d, aes(x = Primary.Lifestyle, y = relative_tarsus_length)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Relative Tarsus Length by Primary Lifestyle",
+       x = "Primary Lifestyle", y = "Relative Tarsus Length")
+
+```
+
+#boxlpot of relative beak length
+ggplot(d, aes(x = Trophic.Level, y = relative_beak_length)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Relative Beak Length by Trophic Niche",
+       x = "Trophic Niche", y = "Relative Beak Length")
+
+d <- d |> mutate(logRange = log(Geographic.Range.Area))
+
+anova_model <- lm(logRange ~ Migration, data = d)
+summary(anova_model)
+anova(anova_model)
+```{r}
+pass <- d |> filter(Order1 == "Passeriformes")
+```
+
+```{r}
+m1 <- lm(relBeak ~ Primary.Lifestyle, data = pass)
+m2 <- lm(relBeak ~ Trophic.Level, data = pass)
+```
+
+``` {r}
+m1 <- aov(relBeak ~Primary.Lifestyle + Trophic.Level, data = pass)
+m2 <- aov(relTarsus ~Primary.Lifestyle + Trophic.Level, data = pass)
+```
+
+2-way model adding the possibilty of an interaction effect; to do this, we would modify our model formula a bit using the colo operator (:) to specify a particular interaction term or the asterisk operator (*) to specify all single variables + interaction terms ...
+```{r}
+m8 <- aov(relBeak ~Primary.Lifestyle + Trophic.Level + Primary.Lifestyle:Trophic.Level, data = pass)
+summary(m8)
+```
+
+```{r}
+install.packages("car")
+install.packages("jtools")
+library(car)
+library(jtools)
+```
+
+```{r}
+f <- "https://raw.githubusercontent.com/difiore/ada-datasets/refs/heads/main/zombies.csv"
+
+z <- read_csv(f, col_names = TRUE)
+
+m <- lm(height ~ weight + age, data = z)
+summary(m)
+
+```
+
+```{r}
+plot(m$model$weight, residuals(m)) #relationship of each predictor and residuals of model
+plot(m$model$age, residuals(m))
+plot(fitted(m), residuals(m))
+summary(aov(m))
+```
+
+```{r}
+(f <- (summary(m)$r.squared*(nrow(z)-2-1))/((1-summary(m)$r.squared)*2)) #calculate f statistic
+```
+```{r}
+temp <- lm(height ~ weight + age + gender, data = z)
+summary(m)
+```
+
+```{r}
+boxplot(residuals(m) ~ m$model$gender)
+```
+Variance inflation factor is how easily each predictor variable is predicted by other predicted variables
+to what extent is gender predicted by age and weight
+to what extent is age predicted by gender and weight
+to what extent is weight predicted by gender and age
+
+```{r}
+vif(m)
+```
+
+
+
+
+
+
+
