@@ -14,6 +14,7 @@ library(tidyr)
 library(skimr)
 library(ggplot2)
 library(cowplot)
+library(infer)
 ```
 
 DATA
@@ -34,82 +35,177 @@ d <- d |> mutate(logMass = log(Mass))
 ```
 
 ```{r}
-#relative beak length
+# Boxplot: logMass by Trophic.Level
+ggplot(d, aes(x = Trophic.Level, y = logMass)) +
+  geom_boxplot() +
+  labs(title = "Log(Mass) by Trophic Level",
+       x = "Trophic Level",
+       y = "Log(Mass)") +
+  theme_minimal()
+
+# Convert Migration to a factor with meaningful labels
+d <- d |> 
+  mutate(Migration = factor(Migration,
+                            levels = c(1, 2, 3),
+                            labels = c("Resident", "Partial Migrant", "Migrant")))
+
+# Then replot with the corrected factor levels
+ggplot(d, aes(x = Migration, y = logMass)) +
+  geom_boxplot() +
+  labs(title = "Log(Mass) by Migration Behavior",
+       x = "Migration Type",
+       y = "Log(Mass)") +
+  theme_minimal()
+```
+## Step 2
+
+```{r}
+# Linear model: logMass ~ Trophic.Level
+mod_trophic <- lm(logMass ~ Trophic.Level, data = d)
+summary(mod_trophic)
+
+# Linear model: logMass ~ Migration
+mod_migration <- lm(logMass ~ Migration, data = d)
+summary(mod_migration)
+
+```
+The f-stat for  both models is large and significant with the p values also being small -> we reject null hypothesis
+
+```{r}
+# Change reference level to "Partial Migrant"
+d <- d |> mutate(Migration = relevel(Migration, ref = "Partial Migrant"))
+
+# Run the model again
+mod_migration_relevel <- lm(logMass ~ Migration, data = d)
+summary(mod_migration_relevel)
+```
+Partial Migrants are the heaviest group on average (since they are the refernce).
+
+Residents are significantly lighter than Partial Migrants by ~0.76 log units.
+
+Migrants are also significantly lighter than Partial Migrants by ~0.38 log units.
+
+## Step 3
+
+```{r}
+anova_migration <- aov(logMass ~ Migration, data = d)
+
+tukey_migration <- TukeyHSD(anova_migration)
+tukey_migration
+```
+## Step 4
+
+```{r}
+# Step 1: Start with your dataset (remove missing values to match lm())
+d_clean <- d |> filter(!is.na(logMass), !is.na(Trophic.Level))
+
+# Step 2: Specify the model and simulate null distribution
+null_distribution <- d_clean |>
+  specify(logMass ~ Trophic.Level) |>
+  hypothesize(null = "independence") |>
+  generate(reps = 1000, type = "permute") |>
+  calculate(stat = "F")
+
+# Step 3: Calculate the observed F-statistic from your original model
+observed_f <- lm(logMass ~ Trophic.Level, data = d_clean) |> 
+  summary() |> 
+  (\(x) x$fstatistic[1])() |> 
+  as.numeric()
+
+# Step 4: Visualize null distribution and add observed F
+ggplot(null_distribution, aes(x = stat)) +
+  geom_histogram(bins = 30, fill = "lightsteelblue", color = "white") +
+  geom_vline(xintercept = observed_f, color = "hotpink2", linetype = "dashed") +
+  labs(title = "Permutation Test: F-statistic for Trophic.Level",
+       x = "F-statistic (null distribution)",
+       y = "Count") +
+  theme_minimal()
+
+# Step 5: Calculate empirical p-value
+p_value <- null_distribution |>
+  summarize(p_val = mean(stat >= observed_f))
+
+p_value
+
+```
+
+# Challenge 2
+
+## Step 1
+```{r}
+# Calculate relative beak length (residuals from log-log regression)
 relBeak <- lm(log(Beak.Length_Culmen) ~ logMass, data = d)
 d <- d |> mutate(relBeak = resid(relBeak))
 ```
 
 ```{r}
-relTarsus <- lm(log(Tarsus.Length) ~ logMass, data = d) 
+# Calculate relative tarsus length (residuals from log-log regression)
+relTarsus <- lm(log(Tarsus.Length) ~ logMass, data = d)
 d <- d |> mutate(relTarsus = resid(relTarsus))
 ```
 
 ```{r}
-p1 <- ggplot(data = d |>
-               drop_na(Primary.Lifestyle),
-             aes(x = Primary.Lifestyle, y = relBeak)) +
-  geom_boxplot()
+# Boxplot 1: relTarsus by Primary.Lifestyle
+p1 <- ggplot(data = d |> drop_na(Primary.Lifestyle),
+             aes(x = Primary.Lifestyle, y = relTarsus)) +
+  geom_boxplot() +
+  labs(title = "Relative Tarsus Length by Primary Lifestyle",
+       x = "Primary Lifestyle", y = "Relative Tarsus Length") +
+  theme_minimal()
+
 p1
 
-p2 <- ggplot(data = d |>
-              drop_na(Primary.Lifestyle),
-            aes(x = Primary.Lifestyle, y = relTarsus)) +
-  geom_boxplot()
-p2
-
-plot_grid(p1, p2, nrow=1)
-```
-
-```{r}
-#create log mass variable
-d <- d |> mutate(logMass = log(Mass))
-
-#create relative beak length
-beak_model <- lm(log(Beak.Length_Culmen) ~ logMass, data = d)
-d <- d |> mutate(relative_beak_length = resid(beak_model))
-
-#relBeak <- lm(logBeak ~ logMass, data = d) #difiore, change the logBeak to actual log
-relBeak <- lm(log(Beak.Length.Culmen) ~ log(Mass), data = d)
-d <- d |> mutate(relative_beak_length = resid(beak_model))
-
-#logBeak ~ logMass, data = d)
-
-#create relative tarsus length
-tarsus_model <- lm(log(Tarsus.Length) ~ logMass, data = d)
-d <- d |> mutate(relative_tarsus_length = resid(tarsus_model))
-
-relTarsus <- lm(logTarsus ~ logMass, data = d) #difiore
-```
-
-```{r}
-#boxplot of relative tarsus length by primary lifestyle
-p1 <- ggplot(d, aes(x = Primary.Lifestyle, y = relative_tarsus_length)) +
+# Boxplot 2: relBeak by Trophic.Niche
+p2 <- ggplot(data = d |> drop_na(Trophic.Niche),
+             aes(x = Trophic.Niche, y = relBeak)) +
   geom_boxplot() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  labs(title = "Relative Tarsus Length by Primary Lifestyle",
-       x = "Primary Lifestyle", y = "Relative Tarsus Length")
-
-```
-
-#boxlpot of relative beak length
-ggplot(d, aes(x = Trophic.Level, y = relative_beak_length)) +
-  geom_boxplot() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   labs(title = "Relative Beak Length by Trophic Niche",
-       x = "Trophic Niche", y = "Relative Beak Length")
+       x = "Trophic Niche", y = "Relative Beak Length") +
+  theme_minimal() 
 
-d <- d |> mutate(logRange = log(Geographic.Range.Area))
+# Arrange the two plots side-by-side
+plot_grid(p1, p2, nrow = 1)
+```
+## Step 3
 
-anova_model <- lm(logRange ~ Migration, data = d)
-summary(anova_model)
-anova(anova_model)
+```{R}
+# Histogram of Range.Size
+ggplot(d, aes(x = Range.Size)) +
+  geom_histogram(bins = 50, fill = "lightsteelblue", color = "white") +
+  scale_x_continuous(trans = "log10") +
+  labs(title = "Distribution of Range Size (log10 scale)", x = "Range Size", y = "Count") +
+  theme_minimal()
+
+```
+
+```{r}
+# Drop NAs and transform Range.Size
+d_range <- d |> 
+  filter(!is.na(Migration), !is.na(Range.Size)) |>
+  mutate(logRange = log(Range.Size))  # log10 is common for range area
+
+# Make sure Migration is a factor (should already be from previous steps)
+d_range$Migration <- factor(d_range$Migration)
+
+# Run ANOVA
+mod_range <- aov(logRange ~ Migration, data = d_range)
+summary(mod_range)
+
+```
+
+## Step 4
 ```{r}
 pass <- d |> filter(Order1 == "Passeriformes")
 ```
 
 ```{r}
-m1 <- lm(relBeak ~ Primary.Lifestyle, data = pass)
-m2 <- lm(relBeak ~ Trophic.Level, data = pass)
+# One-factor models (separate)
+m1 <- aov(relBeak ~ Primary.Lifestyle, data = pass)
+m2 <- aov(relBeak ~ Trophic.Level, data = pass)
+
+# Summary of each
+summary(m1)
+summary(m2)
 ```
 
 ``` {r}
@@ -117,12 +213,86 @@ m1 <- aov(relBeak ~Primary.Lifestyle + Trophic.Level, data = pass)
 m2 <- aov(relTarsus ~Primary.Lifestyle + Trophic.Level, data = pass)
 ```
 
+```{r}
+# Boxplot: relBeak ~ Primary.Lifestyle
+p1 <- ggplot(pass, aes(x = Primary.Lifestyle, y = relBeak)) +
+  geom_boxplot() +
+  labs(title = "Relative Beak Length by Primary Lifestyle") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Boxplot: relBeak ~ Trophic.Level
+p2 <- ggplot(pass, aes(x = Trophic.Level, y = relBeak)) +
+  geom_boxplot() +
+  labs(title = "Relative Beak Length by Trophic Level") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Boxplot: relBeak by combination of both predictors
+p3 <- ggplot(pass, aes(x = interaction(Primary.Lifestyle, Trophic.Level), y = relBeak)) +
+  geom_boxplot() +
+  labs(title = "Relative Beak Length by Lifestyle & Trophic Level",
+       x = "Lifestyle.Trophic") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+# Arrange plots side-by-side
+plot_grid(p1, p2, p3, nrow = 1)
+```
+
+
+## Step 5 
+
 2-way model adding the possibilty of an interaction effect; to do this, we would modify our model formula a bit using the colo operator (:) to specify a particular interaction term or the asterisk operator (*) to specify all single variables + interaction terms ...
+
+```{r}
+m5 <- aov(relBeak ~ Primary.Lifestyle + Trophic.Level, data = pass)
+summary(m5)
+```
+
 ```{r}
 m8 <- aov(relBeak ~Primary.Lifestyle + Trophic.Level + Primary.Lifestyle:Trophic.Level, data = pass)
 summary(m8)
 ```
 
+## Step 7
+
+```{r}
+# Make sure the factors are set correctly
+pass$Primary.Lifestyle <- factor(pass$Primary.Lifestyle)
+pass$Trophic.Level <- factor(pass$Trophic.Level)
+
+# Create the interaction plot
+interaction.plot(x.factor = pass$Trophic.Level,
+                 trace.factor = pass$Primary.Lifestyle,
+                 response = pass$relBeak,
+                 fun = mean,
+                 type = "b",
+                 legend = TRUE,
+                 xlab = "Trophic Level",
+                 ylab = "Mean Relative Beak Length",
+                 trace.label = "Primary Lifestyle",
+                 col = 1:6,
+                 pch = 1:6,
+                 lty = 1,
+                 main = "Interaction Plot: Primary Lifestyle × Trophic Level")
+```
+## Step 8
+
+```{r}
+# From model with relBeak ~ Trophic.Level
+mod_check <- lm(relBeak ~ Trophic.Level, data = pass)
+pass$resid_check <- resid(mod_check)
+pass$fitted_check <- fitted(mod_check)
+
+ggplot(pass, aes(x = resid_check)) +
+  geom_histogram(bins = 30, fill = "lightsteelblue", color = "white") +
+  facet_wrap(~Trophic.Level, scales = "free") +
+  labs(title = "Distribution of Residuals by Trophic Level",
+       x = "Residuals", y = "Count")
+
+```
+The residuals appear approximately normally distributed within each trophic level, which supports the assumption of normality.
+
+
+Class Notes
 ```{r}
 install.packages("car")
 install.packages("jtools")
